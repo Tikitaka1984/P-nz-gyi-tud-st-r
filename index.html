@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pénzügyi Tudástár+</title>
+<link href="https://unpkg.com/vis-network/styles/vis-network.min.css" rel="stylesheet" type="text/css" />
+<script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+    :root {
+        --primary-dark: #0F1C2E;
+        --primary-mid: #1F4D59;
+        --primary-accent: #C19A6B;
+        --text-light: #E8EEF2;
+        --text-dark: #2D2D2D;
+        --sidebar-bg: #F0F2F5;
+        --glass-bg: rgba(26,36,58,0.8);
+        --glass-border: rgba(193, 154, 107, 0.4);
+    }
+
+    body {
+        margin: 0;
+        font-family: 'Segoe UI', Tahoma, sans-serif;
+        background: linear-gradient(180deg, var(--primary-dark) 0%, var(--primary-mid) 100%);
+        color: var(--text-light);
+        display: flex;
+        height: 100vh;
+        overflow: hidden;
+    }
+
+    /* TOP NAVBAR */
+    .navbar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 52px;
+        background: #0A1522;
+        color: var(--primary-accent);
+        font-size: 20px;
+        padding: 10px 25px;
+        display: flex;
+        align-items: center;
+        box-sizing: border-box;
+        font-weight: bold;
+        z-index: 10;
+        letter-spacing: 1px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.6);
+    }
+
+    /* MAIN LAYOUT */
+    .container {
+        margin-top: 52px;
+        width: 100%;
+        display: flex;
+        height: calc(100vh - 52px);
+    }
+
+    /* LEFT PANEL */
+    .left-panel {
+        flex: 1;
+        padding: 40px;
+        overflow-y: auto;
+        backdrop-filter: blur(8px);
+        background: rgba(255,255,255,0.05);
+    }
+    /* Scrollbar for dark theme */
+    .left-panel::-webkit-scrollbar { width: 8px; }
+    .left-panel::-webkit-scrollbar-track { background: transparent; }
+    .left-panel::-webkit-scrollbar-thumb { background: #5A6A89; border-radius: 4px; }
+    .left-panel::-webkit-scrollbar-thumb:hover { background: var(--primary-accent); }
+
+
+    /* SEARCH BAR */
+    .search-container {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 25px;
+    }
+    .search-bar {
+        width: 80%;
+        padding: 12px 16px;
+        font-size: 16px;
+        border: 1px solid #5A6A89;
+        border-radius: 8px;
+        outline: none;
+        transition: border-color 0.2s, box-shadow 0.2s;
+        background: #2C3548;
+        color: var(--text-light);
+    }
+    .search-bar::placeholder { color: #C8D0E0; }
+    .search-bar:focus {
+        border-color: var(--primary-accent);
+        box-shadow: 0 0 10px rgba(193, 154, 107, 0.3);
+    }
+
+    /* CONTENT AREA */
+    .placeholder-box {
+        text-align: center;
+        margin-top: 120px;
+        color: #aeb9c5;
+        opacity: 0.85;
+    }
+    .placeholder-box img {
+        opacity: 0.9;
+    }
+    .placeholder-box h2 {
+        font-size: 26px;
+        margin-top: 15px;
+        color: var(--text-light);
+    }
+    .loading-spinner {
+        display: none;
+        justify-content: center;
+        align-items: center;
+        height: 200px;
+    }
+    .spinner {
+      border: 4px solid rgba(255, 255, 255, 0.2);
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border-left-color: var(--primary-accent);
+      animation: spin 1s ease infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* RIGHT SIDEBAR */
+    .sidebar {
+        width: 310px;
+        background: var(--sidebar-bg);
+        color: var(--text-dark);
+        padding: 20px;
+        border-left: 2px solid var(--primary-accent);
+        overflow-y: auto;
+    }
+
+    .section-title {
+        font-weight: bold;
+        margin-top: 0;
+        margin-bottom: 10px;
+        font-size: 15px;
+        color: #111;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    /* Accordion */
+    details {
+        background: #fff;
+        padding: 10px;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        border: 1px solid #ddd;
+        transition: box-shadow 0.2s;
+    }
+    details[open] {
+      border-color: var(--primary-accent);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    summary {
+        cursor: pointer;
+        font-weight: bold;
+        padding: 5px 0;
+    }
+    .category-content {
+        color: #555;
+    }
+    .category-list {
+        margin-top: 10px;
+        padding-left: 15px;
+    }
+    .category-list li {
+        padding: 4px 0;
+        cursor: pointer;
+        color: #333;
+        list-style-type: disc;
+    }
+    .category-list li:hover {
+        color: var(--primary-mid);
+        font-weight: 500;
+    }
+
+
+    /* Buttons */
+    .button {
+        width: 100%;
+        padding: 12px;
+        font-size: 15px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        margin-top: 15px;
+        font-weight: bold;
+        transition: transform 0.1s, background-color 0.2s, box-shadow 0.2s;
+    }
+    .button:hover {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+    .button:active {
+      transform: translateY(1px);
+    }
+    .btn-random { background: #1F4D59; color: white; }
+    .btn-log { background: var(--primary-accent); color: var(--primary-dark); }
+    .btn-essay { background: #5A6A89; color: white; }
+    .btn-add-log {
+        background: var(--primary-accent);
+        color: var(--primary-dark);
+        margin-top: 20px;
+    }
+    .btn-add-log:disabled {
+        background: #5A6A89;
+        color: #aeb9c5;
+        cursor: not-allowed;
+    }
+    .btn-suggest { background: #00796B; color: white; } /* Teal */
+    .btn-view-suggestions { background: #4527A0; color: white; } /* Deep Purple */
+    .btn-quiz { background: #00838F; color: white; } /* Cyan */
+
+
+    /* RESULT PANEL */
+    .result-box {
+        background: var(--glass-bg);
+        border: 1px solid var(--glass-border);
+        border-radius: 10px;
+        padding: 25px;
+        box-shadow: 0px 4px 20px rgba(0,0,0,0.4);
+        margin-top: 10px;
+        text-align: left;
+    }
+    .result-box h2 {
+        margin-top: 0;
+        color: var(--text-light);
+        font-size: 28px;
+        border-bottom: 1px solid var(--primary-accent);
+        padding-bottom: 8px;
+    }
+    .result-box h3 {
+        font-size: 14px;
+        color: var(--primary-accent);
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        border-bottom: 2px solid rgba(193, 154, 107, 0.2);
+        padding-bottom: 5px;
+        margin-top: 20px;
+    }
+    .result-box p, .result-box ul {
+        margin-top: 5px;
+        line-height: 1.6;
+        color: #d4d9e3;
+    }
+    .related-terms-list {
+      list-style: none;
+      padding: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .related-terms-list li {
+      background: #2C3548;
+      border: 1px solid #5A6A89;
+      color: #d4d9e3;
+      padding: 5px 12px;
+      border-radius: 15px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background-color 0.2s, border-color 0.2s;
+    }
+    .related-terms-list li:hover {
+      background: var(--primary-accent);
+      border-color: var(--primary-accent);
+      color: var(--primary-dark);
+    }
+    #term-graph-container {
+      width: 100%;
+      height: 350px;
+      border: 1px solid var(--glass-border);
+      border-radius: 8px;
+      margin-top: 10px;
+      background: rgba(0,0,0,0.1);
+    }
+    .exam-questions {
+        white-space: pre-wrap;
+        background: rgba(0,0,0,0.2);
+        padding: 15px;
+        border-radius: 8px;
+        font-family: 'Courier New', Courier, monospace;
+    }
+    
+    /* Styles for the suggestions review panel */
+    .suggestion-item {
+        background: rgba(0,0,0,0.2);
+        border: 1px solid #5A6A89;
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+    }
+    .suggestion-item strong {
+        color: var(--primary-accent);
+        font-size: 18px;
+    }
+    .suggestion-item p {
+        margin: 5px 0 15px 0;
+        color: #d4d9e3;
+        font-style: italic;
+    }
+    .suggestion-actions button {
+        padding: 6px 12px;
+        font-size: 14px;
+        margin-right: 10px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-weight: bold;
+    }
+    .btn-accept-suggestion {
+        background: #4CAF50; /* Green */
+        color: white;
+    }
+    .btn-reject-suggestion {
+        background: #f44336; /* Red */
+        color: white;
+    }
+    
+    /* Quiz Styles */
+    .quiz-container { text-align: center; }
+    .quiz-question { font-size: 1.2em; margin-bottom: 25px; }
+    .quiz-options {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+    }
+    .quiz-option {
+        background: #2C3548;
+        border: 1px solid #5A6A89;
+        color: var(--text-light);
+        padding: 15px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        text-align: left;
+        font-family: inherit;
+        font-size: 15px;
+        height: 100%; /* Make buttons in a row same height */
+    }
+    .quiz-option:not(:disabled):hover {
+        background: var(--primary-accent);
+        border-color: var(--primary-accent);
+        color: var(--primary-dark);
+    }
+    .quiz-container.answered .quiz-option { cursor: not-allowed; }
+    .quiz-container.answered .quiz-option:not(.correct):not(.incorrect) {
+       opacity: 0.6;
+    }
+
+    .quiz-option.correct {
+        background-color: #4CAF50;
+        border-color: #4CAF50;
+        color: white;
+    }
+    .quiz-option.incorrect {
+        background-color: #f44336;
+        border-color: #f44336;
+        color: white;
+    }
+    .quiz-feedback { margin-top: 20px; font-size: 1.3em; font-weight: bold; }
+    .feedback-correct { color: #4CAF50; }
+    .feedback-incorrect { color: #f44336; }
+    #nextQuestionBtn { margin: 20px auto 0; width: 50%; }
+
+    @media (max-width: 600px) {
+      .quiz-options { grid-template-columns: 1fr; }
+    }
+
+
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.29.1"
+  }
+}
+</script>
+</head>
+
+<body>
+
+<div class="navbar">Pénzügyi Tudástár+</div>
+
+<div class="container">
+
+    <!-- LEFT MAIN CONTENT -->
+    <div class="left-panel">
+
+        <div class="search-container">
+            <input type="text" id="searchInput" class="search-bar" placeholder="Keress egy pénzügyi fogalmat…">
+        </div>
+
+        <div id="contentArea">
+            <div id="welcomeBox" class="placeholder-box">
+                <img src="https://cdn-icons-png.flaticon.com/512/2329/2329087.png" width="90" alt="Ikon">
+                <h2>Üdv a Pénzügyi Tudástár+ felületén!</h2>
+                <p>Kezdje a tanulást kereséssel, vagy válasszon kategóriát a jobb oldalon.</p>
+            </div>
+            <div id="loadingSpinner" class="loading-spinner">
+                <div class="spinner"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+
+        <div class="section-title">Témakörök</div>
+        
+        <div id="categoryAccordion">
+            <details data-category="gazdasági alapfogalmak és vállalkozási ismeretek"><summary>Gazdasági alapfogalmak</summary><div class="category-content"></div></details>
+            <details data-category="pénzügy és pénzkezelés"><summary>Pénzügy</summary><div class="category-content"></div></details>
+            <details data-category="számvitel és bizonylatkezelés"><summary>Számvitel</summary><div class="category-content"></div></details>
+            <details data-category="adózás és elektronikus ügyintézés"><summary>Adózás</summary><div class="category-content"></div></details>
+            <details data-category="banki és pénzügyi műveletek"><summary>Banki ismeretek</summary><div class="category-content"></div></details>
+            <details data-category="statisztika és gazdasági számítások"><summary>Statisztika</summary><div class="category-content"></div></details>
+            <details data-category="vállalkozások gazdálkodása"><summary>Vállalkozási ismeretek</summary><div class="category-content"></div></details>
+            <details data-category="pénzügyi piacok és befektetések"><summary>Pénzügyi piacok</summary><div class="category-content"></div></details>
+            <details data-category="digitális alkalmazások és irodai szoftverek"><summary>Digitális alkalmazások</summary><div class="category-content"></div></details>
+            <details data-category="leltár, készletgazdálkodás, eszközök"><summary>Leltár és eszközök</summary><div class="category-content"></div></details>
+            <details data-category="munkavállalói és munkajogi fogalmak"><summary>Munkajog</summary><div class="category-content"></div></details>
+        </div>
+
+        <button id="randomTermBtn" class="button btn-random">Adj egy véletlen fogalmat</button>
+        <button id="startQuizBtn" class="button btn-quiz">Kvíz Indítása</button>
+        <button id="glossaryLogBtn" class="button btn-log">Fogalomnapló megnyitása</button>
+        <button id="examGenBtn" class="button btn-essay">Vizsgafeladat-generátor (AI)</button>
+        <button id="suggestTermBtn" class="button btn-suggest">Fogalom Javaslata</button>
+        <button id="viewSuggestionsBtn" class="button btn-view-suggestions">Javaslatok Megtekintése</button>
+
+
+    </div>
+
+</div>
+
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
