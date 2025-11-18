@@ -4,6 +4,7 @@ export interface GlossaryEntry {
   relatedTerms: string[];
   category: string;
   examRole: string;
+  keyTermsInDefinition: string[];
 }
 
 export interface Suggestion {
@@ -19,4 +20,14 @@ export interface QuizOption {
 export interface QuizQuestion {
   term: string;
   options: QuizOption[];
+}
+
+export interface Toast {
+    id: number;
+    message: string;
+    type: 'info' | 'success' | 'error' | 'warning';
+}
+
+export interface Category {
+    name: string;
 }

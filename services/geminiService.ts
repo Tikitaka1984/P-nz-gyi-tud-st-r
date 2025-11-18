@@ -33,8 +33,9 @@ const glossaryEntrySchema = {
         relatedTerms: { type: Type.ARRAY, items: { type: Type.STRING }, description: "5-10 olyan kifejezés, amely logikailag vagy tematikusan összefügg vele." },
         category: { type: Type.STRING, description: "Besorolás a 11 kategória egyikébe." },
         examRole: { type: Type.STRING, description: "pl. 'fogalom-meghatározás', 'számítási példa', 'esettanulmány'." },
+        keyTermsInDefinition: { type: Type.ARRAY, items: { type: Type.STRING }, description: "A definíció szövegében található kulcsfontosságú pénzügyi szakkifejezések listája. A listában szereplő szavaknak pontosan meg kell egyezniük a definícióban szereplő formával." }
     },
-    required: ["term", "definition", "relatedTerms", "category", "examRole"]
+    required: ["term", "definition", "relatedTerms", "category", "examRole", "keyTermsInDefinition"]
 };
 
 const quizQuestionSchema = {
@@ -58,7 +59,7 @@ const quizQuestionSchema = {
 };
 
 export const getTermDetails = async (term: string): Promise<GlossaryEntry | null> => {
-    const prompt = `Definiáld a következő pénzügyi-számviteli fogalmat a megadott JSON struktúra szerint: "${term}". A fogalmat sorold be a következő kategóriák egyikébe: gazdasági alapfogalmak és vállalkozási ismeretek; pénzügy és pénzkezelés; számvitel és bizonylatkezelés; adózás és elektronikus ügyintézés; banki és pénzügyi műveletek; pénzügyi piacok és befektetések; statisztika és gazdasági számítások; vállalkozások gazdálkodása; digitális alkalmazások és irodai szoftverek; leltár, készletgazdálkodás, eszközök; munkavállalói és munkajogi fogalmak.`;
+    const prompt = `Definiáld a következő pénzügyi-számviteli fogalmat a megadott JSON struktúra szerint: "${term}". A definíció szövegében előforduló más fontos pénzügyi fogalmakat gyűjtsd ki a 'keyTermsInDefinition' listába. A fogalmat sorold be a következő kategóriák egyikébe: gazdasági alapfogalmak és vállalkozási ismeretek; pénzügy és pénzkezelés; számvitel és bizonylatkezelés; adózás és elektronikus ügyintézés; banki és pénzügyi műveletek; pénzügyi piacok és befektetések; statisztika és gazdasági számítások; vállalkozások gazdálkodása; digitális alkalmazások és irodai szoftverek; leltár, készletgazdálkodás, eszközök; munkavállalói és munkajogi fogalmak.`;
     try {
         const response = await ai.models.generateContent({
             model,
@@ -177,5 +178,43 @@ export const getQuizQuestion = async (existingTerms: string[]): Promise<QuizQues
     } catch (error) {
         console.error(`Hiba a kvízkérdés generálásakor:`, error);
         return null;
+    }
+};
+
+
+export const getCategoryList = async (): Promise<string[]> => {
+    const prompt = `Sorold fel a 11 fő pénzügyi-számviteli kategóriát, amit a rendszered használ. A válasz egy JSON tömb legyen, amely csak a kategóriák neveit tartalmazza stringként. Pl: ["Adózás", "Számvitel"].`;
+    try {
+        const response = await ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+                systemInstruction: `Te egy AI asszisztens vagy, aki egy pénzügyi szótár háttérrendszereként működik. A válaszod legyen mindig csak a kért JSON.`,
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                },
+                temperature: 0.1,
+            },
+        });
+        const jsonText = response.text.trim();
+        return JSON.parse(jsonText) as string[];
+    } catch (error) {
+        console.error(`Hiba a kategórialista lekérésekor:`, error);
+        // Fallback in case of API error
+        return [
+            "gazdasági alapfogalmak és vállalkozási ismeretek",
+            "pénzügy és pénzkezelés",
+            "számvitel és bizonylatkezelés",
+            "adózás és elektronikus ügyintézés",
+            "banki és pénzügyi műveletek",
+            "pénzügyi piacok és befektetések",
+            "statisztika és gazdasági számítások",
+            "vállalkozások gazdálkodása",
+            "digitális alkalmazások és irodai szoftverek",
+            "leltár, készletgazdálkodás, eszközök",
+            "munkavállalói és munkajogi fogalmak"
+        ];
     }
 };

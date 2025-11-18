@@ -275,6 +275,18 @@
       border-color: var(--primary-accent);
       color: var(--primary-dark);
     }
+    .clickable-term {
+        color: var(--primary-accent);
+        cursor: pointer;
+        font-weight: bold;
+        text-decoration: underline;
+        text-decoration-color: rgba(193, 154, 107, 0.5);
+        transition: color 0.2s, text-decoration-color 0.2s;
+    }
+    .clickable-term:hover {
+        color: #f0c9a6;
+        text-decoration-color: #f0c9a6;
+    }
     #term-graph-container {
       width: 100%;
       height: 350px;
@@ -376,6 +388,122 @@
       .quiz-options { grid-template-columns: 1fr; }
     }
 
+    /* TOAST NOTIFICATIONS */
+    #toastContainer {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 10px;
+    }
+    .toast {
+        padding: 12px 20px;
+        border-radius: 8px;
+        color: white;
+        font-weight: bold;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        opacity: 0;
+        transform: translateX(100%);
+        transition: all 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+    }
+    .toast.show {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    .toast.info { background: #2196F3; } /* Blue */
+    .toast.success { background: #4CAF50; } /* Green */
+    .toast.error { background: #f44336; } /* Red */
+    .toast.warning { background: #ff9800; } /* Orange */
+
+
+    /* MODAL DIALOG */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.7);
+        backdrop-filter: blur(5px);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 900;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+    .modal-overlay.show {
+        display: flex;
+        opacity: 1;
+    }
+    .modal-dialog {
+        background: var(--primary-dark);
+        border: 1px solid var(--primary-accent);
+        padding: 30px;
+        border-radius: 12px;
+        width: 90%;
+        max-width: 500px;
+        box-shadow: 0 5px 25px rgba(0,0,0,0.5);
+        transform: scale(0.95);
+        transition: transform 0.3s ease;
+    }
+    .modal-overlay.show .modal-dialog {
+        transform: scale(1);
+    }
+    .modal-dialog h2 {
+        margin-top: 0;
+        color: var(--text-light);
+        border-bottom: 1px solid var(--primary-accent);
+        padding-bottom: 10px;
+    }
+    .modal-form-group {
+        margin-bottom: 20px;
+    }
+    .modal-form-group label {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--primary-accent);
+        font-weight: bold;
+    }
+    .modal-input, .modal-textarea {
+        width: 100%;
+        padding: 10px;
+        background: #2C3548;
+        border: 1px solid #5A6A89;
+        border-radius: 6px;
+        color: var(--text-light);
+        font-size: 16px;
+        box-sizing: border-box;
+    }
+    .modal-textarea {
+        resize: vertical;
+        min-height: 100px;
+    }
+    .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 20px;
+    }
+    .modal-button {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        font-weight: bold;
+        cursor: pointer;
+    }
+    .modal-button.primary {
+        background: var(--primary-accent);
+        color: var(--primary-dark);
+    }
+    .modal-button.secondary {
+        background: #5A6A89;
+        color: var(--text-light);
+    }
+
 
 </style>
 <script type="importmap">
@@ -397,12 +525,12 @@
     <div class="left-panel">
 
         <div class="search-container">
-            <input type="text" id="searchInput" class="search-bar" placeholder="Keress egy pénzügyi fogalmat…">
+            <input type="text" id="searchInput" class="search-bar" placeholder="Keress egy pénzügyi fogalmat…" aria-label="Keress egy pénzügyi fogalmat">
         </div>
 
         <div id="contentArea">
             <div id="welcomeBox" class="placeholder-box">
-                <img src="https://cdn-icons-png.flaticon.com/512/2329/2329087.png" width="90" alt="Ikon">
+                <img src="https://cdn-icons-png.flaticon.com/512/2329/2329087.png" width="90" alt="Egy könyv és egy nagyító ikonja, ami a tudást és a keresést szimbolizálja.">
                 <h2>Üdv a Pénzügyi Tudástár+ felületén!</h2>
                 <p>Kezdje a tanulást kereséssel, vagy válasszon kategóriát a jobb oldalon.</p>
             </div>
@@ -418,29 +546,28 @@
         <div class="section-title">Témakörök</div>
         
         <div id="categoryAccordion">
-            <details data-category="gazdasági alapfogalmak és vállalkozási ismeretek"><summary>Gazdasági alapfogalmak</summary><div class="category-content"></div></details>
-            <details data-category="pénzügy és pénzkezelés"><summary>Pénzügy</summary><div class="category-content"></div></details>
-            <details data-category="számvitel és bizonylatkezelés"><summary>Számvitel</summary><div class="category-content"></div></details>
-            <details data-category="adózás és elektronikus ügyintézés"><summary>Adózás</summary><div class="category-content"></div></details>
-            <details data-category="banki és pénzügyi műveletek"><summary>Banki ismeretek</summary><div class="category-content"></div></details>
-            <details data-category="statisztika és gazdasági számítások"><summary>Statisztika</summary><div class="category-content"></div></details>
-            <details data-category="vállalkozások gazdálkodása"><summary>Vállalkozási ismeretek</summary><div class="category-content"></div></details>
-            <details data-category="pénzügyi piacok és befektetések"><summary>Pénzügyi piacok</summary><div class="category-content"></div></details>
-            <details data-category="digitális alkalmazások és irodai szoftverek"><summary>Digitális alkalmazások</summary><div class="category-content"></div></details>
-            <details data-category="leltár, készletgazdálkodás, eszközök"><summary>Leltár és eszközök</summary><div class="category-content"></div></details>
-            <details data-category="munkavállalói és munkajogi fogalmak"><summary>Munkajog</summary><div class="category-content"></div></details>
+            <!-- Categories will be dynamically inserted here -->
         </div>
 
-        <button id="randomTermBtn" class="button btn-random">Adj egy véletlen fogalmat</button>
-        <button id="startQuizBtn" class="button btn-quiz">Kvíz Indítása</button>
-        <button id="glossaryLogBtn" class="button btn-log">Fogalomnapló megnyitása</button>
-        <button id="examGenBtn" class="button btn-essay">Vizsgafeladat-generátor (AI)</button>
-        <button id="suggestTermBtn" class="button btn-suggest">Fogalom Javaslata</button>
-        <button id="viewSuggestionsBtn" class="button btn-view-suggestions">Javaslatok Megtekintése</button>
+        <button id="randomTermBtn" class="button btn-random" aria-label="Gyakorlás véletlen fogalommal">Adj egy véletlen fogalmat</button>
+        <button id="startQuizBtn" class="button btn-quiz" aria-label="Pénzügyi kvíz indítása">Kvíz Indítása</button>
+        <button id="glossaryLogBtn" class="button btn-log" aria-label="Elmentett fogalmak megnyitása">Fogalomnapló megnyitása</button>
+        <button id="examGenBtn" class="button btn-essay" aria-label="Vizsgafeladatok generálása mesterséges intelligenciával">Vizsgafeladat-generátor (AI)</button>
+        <button id="suggestTermBtn" class="button btn-suggest" aria-label="Új fogalom javaslata a szótárba">Fogalom Javaslata</button>
+        <button id="viewSuggestionsBtn" class="button btn-view-suggestions" aria-label="Felhasználói javaslatok megtekintése és kezelése">Javaslatok Megtekintése</button>
 
 
     </div>
 
+</div>
+
+<!-- Toast & Modal Containers -->
+<div id="toastContainer"></div>
+
+<div id="modalOverlay" class="modal-overlay">
+    <div id="modalDialog" class="modal-dialog">
+        <!-- Modal content will be dynamically inserted here -->
+    </div>
 </div>
 
 <script type="module" src="/index.tsx"></script>

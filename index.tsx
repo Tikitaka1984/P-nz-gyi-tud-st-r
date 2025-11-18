@@ -1,5 +1,5 @@
-import { getTermDetails, getTermsForCategory, generateExamQuestions, getRandomTerm, getQuizQuestion } from './services/geminiService';
-import { type GlossaryEntry, type Suggestion, type QuizQuestion } from './types';
+import { getTermDetails, getTermsForCategory, generateExamQuestions, getRandomTerm, getQuizQuestion, getCategoryList } from './services/geminiService';
+import { type GlossaryEntry, type Suggestion, type QuizQuestion, type Toast, type Category } from './types';
 
 // Let TypeScript know about the vis.js library loaded from CDN
 declare const vis: any;
@@ -10,6 +10,7 @@ const state = {
   glossaryLog: new Set<string>(),
   categoryCache: new Map<string, string[]>(),
   suggestions: [] as Suggestion[],
+  toasts: [] as Toast[],
   isLoading: false,
 };
 
@@ -25,449 +26,464 @@ const suggestTermBtn = document.getElementById('suggestTermBtn') as HTMLButtonEl
 const viewSuggestionsBtn = document.getElementById('viewSuggestionsBtn') as HTMLButtonElement;
 const startQuizBtn = document.getElementById('startQuizBtn') as HTMLButtonElement;
 const categoryAccordion = document.getElementById('categoryAccordion') as HTMLDivElement;
+const toastContainer = document.getElementById('toastContainer') as HTMLDivElement;
+const modalOverlay = document.getElementById('modalOverlay') as HTMLDivElement;
+const modalDialog = document.getElementById('modalDialog') as HTMLDivElement;
 
-// --- UTILITY FUNCTIONS ---
-function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
-  // Fix: Resolve TypeScript error by using the correct return type for `setTimeout`, which can differ between browser and Node.js environments.
-  let timeout: ReturnType<typeof setTimeout>;
-  return (...args: Parameters<F>): Promise<ReturnType<F>> =>
-    new Promise(resolve => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => resolve(func(...args)), waitFor);
-    });
-}
 
-const setLoading = (loading: boolean) => {
-  state.isLoading = loading;
-  welcomeBox.style.display = 'none';
-  loadingSpinner.style.display = loading ? 'flex' : 'none';
-  if (!loading) {
-    const resultBox = contentArea.querySelector('.result-box');
-    if (!resultBox) {
-        welcomeBox.style.display = 'block';
+// --- UI SYSTEMS (TOAST & MODAL) ---
+let toastIdCounter = 0;
+
+const showToast = (message: string, type: 'info' | 'success' | 'error' | 'warning' = 'info', duration: number = 3000) => {
+    const id = toastIdCounter++;
+    const newToast: Toast = { id, message, type };
+    state.toasts.push(newToast);
+
+    const toastElement = document.createElement('div');
+    toastElement.className = `toast ${type}`;
+    toastElement.textContent = message;
+    
+    toastContainer.appendChild(toastElement);
+
+    setTimeout(() => toastElement.classList.add('show'), 10);
+
+    setTimeout(() => {
+        toastElement.classList.remove('show');
+        toastElement.addEventListener('transitionend', () => {
+            toastElement.remove();
+            state.toasts = state.toasts.filter(t => t.id !== id);
+        });
+    }, duration);
+};
+
+const showModal = (title: string, contentHtml: string) => {
+    modalDialog.innerHTML = `
+        <h2>${title}</h2>
+        ${contentHtml}
+    `;
+    modalOverlay.classList.add('show');
+};
+
+const hideModal = () => {
+    modalOverlay.classList.remove('show');
+};
+
+
+// --- LOADING STATE ---
+const setLoading = (isLoading: boolean) => {
+    state.isLoading = isLoading;
+    if (isLoading) {
+        welcomeBox.style.display = 'none';
+        contentArea.innerHTML = '';
+        loadingSpinner.style.display = 'flex';
+    } else {
+        loadingSpinner.style.display = 'none';
     }
-  }
 };
 
 // --- RENDERING FUNCTIONS ---
-const renderTermGraph = (entry: GlossaryEntry) => {
-    const container = document.getElementById('term-graph-container');
-    const title = document.querySelector('h3[data-graph-title]') as HTMLElement;
 
-    if (!container || !entry.relatedTerms || entry.relatedTerms.length === 0) {
-        if (container) container.style.display = 'none';
-        if (title) title.style.display = 'none';
-        return;
-    }
+const renderTerm = (termDetails: GlossaryEntry) => {
+    const isTermInLog = state.glossaryLog.has(termDetails.term);
+    const highlightedDefinition = termDetails.definition.replace(
+        new RegExp(`\\b(${termDetails.keyTermsInDefinition.join('|')})\\b`, 'gi'),
+        (match) => `<span class="clickable-term" tabindex="0" role="button" data-term="${match}">${match}</span>`
+    );
+
+    const relatedTermsHtml = termDetails.relatedTerms.map(term => `<li data-term="${term}">${term}</li>`).join('');
+    
+    contentArea.innerHTML = `
+        <div class="result-box">
+            <h2>${termDetails.term}</h2>
+            <button id="add-to-log-btn" class="button btn-add-log" ${isTermInLog ? 'disabled' : ''}>
+                ${isTermInLog ? 'Naplóban van' : 'Hozzáadás a naplóhoz'}
+            </button>
+            <h3>Definíció</h3>
+            <p>${highlightedDefinition}</p>
+            <h3>Kategória</h3>
+            <p>${termDetails.category}</p>
+            <h3>Vizsgaszerep</h3>
+            <p>${termDetails.examRole}</p>
+            <h3>Kapcsolódó fogalmak</h3>
+            <ul class="related-terms-list">${relatedTermsHtml}</ul>
+            <h3>Fogalmi Térkép</h3>
+            <div id="term-graph-container"></div>
+        </div>
+    `;
+
+    renderTermGraph(termDetails);
+};
+
+const renderTermGraph = (termDetails: GlossaryEntry) => {
+    const container = document.getElementById('term-graph-container');
+    if (!container) return;
 
     const nodes = new vis.DataSet([
-        { id: entry.term.toLowerCase(), label: entry.term, color: '#C19A6B', font: { color: '#0F1C2E' }, shape: 'box', mass: 3 },
-        ...entry.relatedTerms.map(term => ({ id: term.toLowerCase(), label: term }))
+        { id: termDetails.term, label: termDetails.term, color: '#C19A6B', font: { color: '#0F1C2E' }, size: 30 },
+        ...termDetails.relatedTerms.map(term => ({ id: term, label: term, color: '#1F4D59', font: { color: '#E8EEF2' } }))
     ]);
 
     const edges = new vis.DataSet(
-        entry.relatedTerms.map(term => ({ from: entry.term.toLowerCase(), to: term.toLowerCase() }))
+        termDetails.relatedTerms.map(term => ({ from: termDetails.term, to: term }))
     );
 
-    const data = { nodes, edges };
+    const data = { nodes: nodes, edges: edges };
     const options = {
-        physics: {
-            barnesHut: { gravitationalConstant: -4000, springLength: 150, springConstant: 0.05 },
-            minVelocity: 0.75
-        },
-        nodes: {
-            shape: 'dot',
-            size: 16,
-            font: { size: 14, color: '#E8EEF2' },
-            borderWidth: 2,
-            color: {
-                border: '#5A6A89',
-                background: '#2C3548',
-                highlight: {
-                    border: '#C19A6B',
-                    background: '#1F4D59'
-                }
-            }
-        },
-        edges: {
-            width: 2,
-            color: { color: 'rgba(193, 154, 107, 0.3)', highlight: '#C19A6B' }
-        },
-        interaction: { hover: true }
+        nodes: { shape: 'box', borderWidth: 2, font: { size: 14 } },
+        edges: { color: '#5A6A89' },
+        interaction: { hover: true },
+        layout: { hierarchical: false }
     };
 
-    const network = new vis.Network(container, data, options);
-
-    network.on("click", (params) => {
-        if (params.nodes.length > 0) {
-            const nodeId = params.nodes[0];
-            const clickedNode = nodes.get(nodeId);
-            if (clickedNode && clickedNode.label && clickedNode.label.toLowerCase() !== entry.term.toLowerCase()) {
-                displayTerm(clickedNode.label);
-            }
-        }
-    });
+    new vis.Network(container, data, options);
 };
 
-const renderTerm = (entry: GlossaryEntry, isRandom = false) => {
-  const isSaved = state.glossaryLog.has(entry.term);
-  const logButtonHtml = `<button class="button btn-add-log" data-term="${entry.term}" ${isSaved ? 'disabled' : ''}>${isSaved ? 'Elmentve a naplóba' : 'Hozzáadás a fogalomnaplóhoz'}</button>`;
-  
-  const content = `
-    <div class="result-box">
-      ${isRandom ? '<p style="font-style: italic; color: #aeb9c5;"><strong>Tipp:</strong> Ez egy véletlen gyakorló fogalom! Próbálja meg saját szavaival megfogalmazni a jelentését, mielőtt elolvassa.</p>' : ''}
-      <h2>${entry.term}</h2>
-      
-      <h3>Definíció</h3>
-      <p>${entry.definition}</p>
-
-      <h3>Tantárgyi hivatkozás</h3>
-      <p>${entry.category}</p>
-      
-      <h3>Tipikus vizsgaszerep</h3>
-      <p>${entry.examRole}</p>
-
-      <h3>Kapcsolódó fogalmak</h3>
-      <ul class="related-terms-list">
-        ${entry.relatedTerms.map(term => `<li data-term="${term}">${term}</li>`).join('')}
-      </ul>
-
-      <h3 data-graph-title>Vizuális Fogalomtérkép</h3>
-      <div id="term-graph-container"></div>
-      
-      ${logButtonHtml}
-    </div>
-  `;
-  contentArea.innerHTML = content;
-  renderTermGraph(entry); // Render the graph after HTML is in the DOM
-  setLoading(false);
+const renderCategories = (categories: string[]) => {
+    categoryAccordion.innerHTML = categories.map(category => `
+        <details data-category="${category}">
+            <summary>${category}</summary>
+            <div class="category-content"></div>
+        </details>
+    `).join('');
 };
 
-const renderTermList = (terms: string[], title: string) => {
-  const content = `
-    <div class="result-box">
-      <h2>${title}</h2>
-      <ul class="category-list" style="padding-left: 0; list-style-position: inside;">
-        ${terms.map(term => `<li data-term="${term}">${term}</li>`).join('')}
-      </ul>
-    </div>
-  `;
-  contentArea.innerHTML = content;
-  setLoading(false);
-}
+const renderCategoryTerms = (terms: string[], container: Element) => {
+    const listHtml = terms.map(term => `<li data-term="${term}" tabindex="0" role="button" aria-label="Fogalom megnyitása: ${term}">${term}</li>`).join('');
+    container.innerHTML = `<ul class="category-list">${listHtml}</ul>`;
+};
+
+const renderGlossaryLog = () => {
+    const logHtml = Array.from(state.glossaryLog).map(term => 
+        `<li class="clickable-term" tabindex="0" role="button" data-term="${term}">${term}</li>`
+    ).join('');
+
+    contentArea.innerHTML = `
+        <div class="result-box">
+            <h2>Fogalomnapló</h2>
+            ${logHtml.length > 0 ? `<ul>${logHtml}</ul>` : '<p>Még nem mentettél el egyetlen fogalmat sem.</p>'}
+        </div>
+    `;
+};
+
 
 const renderSuggestions = (suggestions: Suggestion[]) => {
-    setLoading(true); 
-    let content: string;
-
-    if (suggestions.length === 0) {
-        content = `
+     if (suggestions.length === 0) {
+        contentArea.innerHTML = `
             <div class="result-box">
                 <h2>Javaslatok</h2>
-                <p>Jelenleg nincsenek felhasználói javaslatok.</p>
-            </div>`;
-    } else {
-        content = `
-            <div class="result-box">
-                <h2>Felhasználói Javaslatok Áttekintése</h2>
-                <div class="suggestions-list">
-                    ${suggestions.map((s, index) => `
-                        <div class="suggestion-item">
-                            <strong>${s.term}</strong>
-                            <p>"${s.definition}"</p>
-                            <div class="suggestion-actions">
-                                <button class="btn-accept-suggestion" data-index="${index}" data-term="${s.term}">Elfogadás és Generálás</button>
-                                <button class="btn-reject-suggestion" data-index="${index}">Elutasítás</button>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>`;
-    }
-    contentArea.innerHTML = content;
-    setLoading(false);
-};
-
-const renderQuizQuestion = (question: QuizQuestion) => {
-  const optionsHtml = question.options.map((opt) =>
-    `<button class="quiz-option" data-correct="${opt.isCorrect}">
-       ${opt.definition}
-     </button>`
-  ).join('');
-
-  const content = `
-    <div class="result-box quiz-container">
-      <h2>Pénzügyi Kvíz</h2>
-      <p class="quiz-question">Melyik definíció tartozik a következő fogalomhoz: <strong>${question.term}</strong>?</p>
-      <div class="quiz-options">
-        ${optionsHtml}
-      </div>
-      <div class="quiz-feedback"></div>
-      <button id="nextQuestionBtn" class="button btn-random" style="display:none;">Következő Kérdés</button>
-    </div>
-  `;
-  contentArea.innerHTML = content;
-  setLoading(false);
-};
-
-
-// --- CORE LOGIC ---
-const displayTerm = async (term: string, isRandom = false) => {
-  if (!term || state.isLoading) return;
-  setLoading(true);
-  try {
-    let entry = state.glossary.get(term.toLowerCase());
-    if (!entry) {
-      entry = await getTermDetails(term);
-      if(entry) {
-        state.glossary.set(entry.term.toLowerCase(), entry);
-      }
-    }
-    if (entry) {
-      renderTerm(entry, isRandom);
-    } else {
-        throw new Error("A fogalom nem található.");
-    }
-  } catch (error) {
-    contentArea.innerHTML = `<div class="result-box"><p>Hiba történt: ${error instanceof Error ? error.message : 'Ismeretlen hiba'}</p></div>`;
-    setLoading(false);
-  }
-};
-
-const handleSearch = async (query: string) => {
-  if (!query.trim() || state.isLoading) {
-    if(!query.trim()){
-      contentArea.innerHTML = '';
-      welcomeBox.style.display = 'block';
-    }
-    return;
-  };
-  setLoading(true);
-  try {
-    // Exact match check first
-    const exactMatch = state.glossary.get(query.toLowerCase());
-    if (exactMatch) {
-      renderTerm(exactMatch);
-      return;
-    }
-    
-    // If no exact match, call AI
-    const entry = await getTermDetails(query);
-    if (entry) {
-      state.glossary.set(entry.term.toLowerCase(), entry);
-      renderTerm(entry);
-    } else {
-       contentArea.innerHTML = `<div class="result-box"><p>A keresett fogalom (${query}) nem található, és nem sikerült új definíciót generálni.</p></div>`;
-       setLoading(false);
-    }
-  } catch (error) {
-    contentArea.innerHTML = `<div class="result-box"><p>Hiba a keresés során: ${error instanceof Error ? error.message : 'Ismeretlen hiba'}</p></div>`;
-    setLoading(false);
-  }
-};
-
-const handleCategoryClick = async (detailsElement: HTMLElement) => {
-    if (!detailsElement.hasAttribute('open') || state.isLoading) return;
-
-    const category = detailsElement.dataset.category;
-    const contentDiv = detailsElement.querySelector('.category-content') as HTMLDivElement;
-    if (!category || !contentDiv) return;
-
-    // Use cache if available
-    if (state.categoryCache.has(category)) {
-        const terms = state.categoryCache.get(category)!;
-        contentDiv.innerHTML = `<ul class="category-list">${terms.map(t => `<li data-term="${t}">${t}</li>`).join('')}</ul>`;
+                <p>Jelenleg nincsenek új fogalomjavaslatok.</p>
+            </div>
+        `;
         return;
     }
 
-    contentDiv.innerHTML = 'Betöltés...';
+    const suggestionsHtml = suggestions.map((s, index) => `
+        <div class="suggestion-item">
+            <strong>${s.term}</strong>
+            <p>"${s.definition}"</p>
+            <div class="suggestion-actions">
+                <button class="btn-accept-suggestion" data-index="${index}">Elfogadás</button>
+                <button class="btn-reject-suggestion" data-index="${index}">Elutasítás</button>
+            </div>
+        </div>
+    `).join('');
+
+    contentArea.innerHTML = `
+        <div class="result-box">
+            <h2>Beérkezett Javaslatok</h2>
+            ${suggestionsHtml}
+        </div>
+    `;
+}
+
+const renderExamQuestions = (questions: string, topic: string) => {
+    contentArea.innerHTML = `
+        <div class="result-box">
+            <h2>Vizsgafeladatok: ${topic}</h2>
+            <div class="exam-questions">${questions}</div>
+        </div>
+    `;
+};
+
+const renderQuiz = (question: QuizQuestion) => {
+    const optionsHtml = question.options.map((opt, index) => 
+        `<button class="quiz-option" data-correct="${opt.isCorrect}">${opt.definition}</button>`
+    ).join('');
+
+    contentArea.innerHTML = `
+        <div class="result-box">
+            <div class="quiz-container">
+                <h2>Kvíz</h2>
+                <p class="quiz-question">Melyik definíció tartozik a következő fogalomhoz: <strong>${question.term}</strong>?</p>
+                <div class="quiz-options">${optionsHtml}</div>
+                <div class="quiz-feedback"></div>
+                <button id="nextQuestionBtn" class="button btn-random" style="display: none;">Következő Kérdés</button>
+            </div>
+        </div>
+    `;
+};
+
+
+// --- DATA FETCHING & LOGIC ---
+
+const searchAndDisplayTerm = async (term: string) => {
+    if (!term || state.isLoading) return;
+    setLoading(true);
+    
+    try {
+        let termDetails = state.glossary.get(term);
+        if (!termDetails) {
+            termDetails = await getTermDetails(term);
+        }
+        
+        if (termDetails) {
+            state.glossary.set(term, termDetails);
+            renderTerm(termDetails);
+        } else {
+            showToast(`A(z) "${term}" fogalom nem található.`, 'error');
+            contentArea.innerHTML = `<div class="result-box"><h2>Hiba</h2><p>A keresett fogalom nem található.</p></div>`;
+        }
+    } catch (error) {
+        console.error("Error during term search:", error);
+        showToast('Hálózati hiba történt.', 'error');
+    } finally {
+        setLoading(false);
+    }
+};
+
+const handleCategoryClick = async (category: string, detailsElement: HTMLDetailsElement) => {
+    const contentDiv = detailsElement.querySelector('.category-content');
+    if (!contentDiv) return;
+
+    if (state.categoryCache.has(category)) {
+        renderCategoryTerms(state.categoryCache.get(category)!, contentDiv);
+        return;
+    }
+
+    contentDiv.innerHTML = `<div style="text-align: center; padding: 10px;">...</div>`;
+    
     try {
         const terms = await getTermsForCategory(category);
-        state.categoryCache.set(category, terms);
-        contentDiv.innerHTML = `<ul class="category-list">${terms.map(t => `<li data-term="${t}">${t}</li>`).join('')}</ul>`;
+        if (terms.length > 0) {
+            state.categoryCache.set(category, terms);
+            renderCategoryTerms(terms, contentDiv);
+        } else {
+            contentDiv.innerHTML = 'Nincsenek fogalmak.';
+        }
     } catch (error) {
+        console.error("Error fetching terms for category:", error);
         contentDiv.innerHTML = 'Hiba a betöltéskor.';
     }
 };
 
-const handleRandomTerm = async () => {
-    if(state.isLoading) return;
+const handleRandomTermClick = async () => {
     setLoading(true);
-    try {
-        const knownTerms = Array.from(state.glossary.keys());
-        const term = await getRandomTerm(knownTerms);
-        await displayTerm(term, true);
-    } catch (error) {
-        contentArea.innerHTML = `<div class="result-box"><p>Hiba a véletlen fogalom lekérése során: ${error instanceof Error ? error.message : 'Ismeretlen hiba'}</p></div>`;
-        setLoading(false);
-    }
+    const knownTerms = Array.from(state.glossary.keys());
+    const randomTerm = await getRandomTerm(knownTerms);
+    await searchAndDisplayTerm(randomTerm);
 };
 
-const handleGlossaryLog = () => {
-  if (state.glossaryLog.size === 0) {
-    renderTermList([], "A fogalomnaplód üres");
-  } else {
-    renderTermList(Array.from(state.glossaryLog), "Fogalomnapló");
-  }
-};
+const handleExamGenClick = () => {
+    const content = `
+        <div class="modal-form-group">
+            <label for="examTopicInput">Milyen témakörben generáljunk feladatokat?</label>
+            <input type="text" id="examTopicInput" class="modal-input" placeholder="pl. Készletgazdálkodás, Adózás alapjai">
+        </div>
+        <div class="modal-actions">
+            <button class="modal-button secondary" id="modalCancelBtn">Mégse</button>
+            <button class="modal-button primary" id="modalSubmitBtn">Generálás</button>
+        </div>
+    `;
+    showModal('Vizsgafeladat-generátor', content);
 
-const handleExamGenerator = async () => {
-    if(state.isLoading) return;
-    const topic = prompt("Melyik témakörből vagy fogalomhoz szeretne vizsgafeladatokat generálni?");
-    if (!topic) return;
-
-    setLoading(true);
-    try {
-        const questions = await generateExamQuestions(topic);
-        const content = `
-            <div class="result-box">
-                <h2>Vizsgafeladatok: ${topic}</h2>
-                <div class="exam-questions">${questions}</div>
-            </div>`;
-        contentArea.innerHTML = content;
-        setLoading(false);
-    } catch (error) {
-        contentArea.innerHTML = `<div class="result-box"><p>Hiba a feladatok generálása során: ${error instanceof Error ? error.message : 'Ismeretlen hiba'}</p></div>`;
-        setLoading(false);
-    }
-};
-
-const handleSuggestTerm = () => {
-    const term = prompt("Melyik fogalmat szeretnéd javasolni?");
-    if (!term || term.trim() === '') return;
-
-    const definition = prompt(`Add meg a(z) "${term}" fogalom definícióját:`);
-    if (!definition || definition.trim() === '') return;
-
-    if (state.suggestions.some(s => s.term.toLowerCase() === term.trim().toLowerCase())) {
-        alert("Ezt a fogalmat már javasolták.");
-        return;
-    }
-
-    const newSuggestion: Suggestion = { term: term.trim(), definition: definition.trim() };
-    state.suggestions.push(newSuggestion);
-    localStorage.setItem('termSuggestions', JSON.stringify(state.suggestions));
-
-    alert("Köszönjük a javaslatot! A moderátorok hamarosan átnézik.");
-};
-
-const handleViewSuggestions = () => {
-    if (state.isLoading) return;
-    renderSuggestions(state.suggestions);
-};
-
-const handleStartQuiz = async () => {
-    if (state.isLoading) return;
-    setLoading(true);
-    try {
-        const knownTerms = Array.from(state.glossary.keys());
-        const question = await getQuizQuestion(knownTerms);
-        if (question) {
-            renderQuizQuestion(question);
+    document.getElementById('modalSubmitBtn')?.addEventListener('click', async () => {
+        const topic = (document.getElementById('examTopicInput') as HTMLInputElement).value;
+        if (topic) {
+            hideModal();
+            setLoading(true);
+            const questions = await generateExamQuestions(topic);
+            renderExamQuestions(questions, topic);
+            setLoading(false);
         } else {
-            throw new Error("Nem sikerült kvízkérdést generálni.");
+            showToast('Kérjük, adjon meg egy témakört!', 'warning');
         }
-    } catch (error) {
-        contentArea.innerHTML = `<div class="result-box"><p>Hiba a kvíz indítása során: ${error instanceof Error ? error.message : 'Ismeretlen hiba'}</p></div>`;
-        setLoading(false);
-    }
+    });
 };
 
+const handleSuggestTermClick = () => {
+    const content = `
+        <div class="modal-form-group">
+            <label for="suggestTermInput">Javasolt fogalom</label>
+            <input type="text" id="suggestTermInput" class="modal-input" placeholder="pl. Halasztott bevétel">
+        </div>
+        <div class="modal-form-group">
+            <label for="suggestDefInput">Definíció javaslat</label>
+            <textarea id="suggestDefInput" class="modal-textarea" placeholder="Írja le a fogalom definícióját..."></textarea>
+        </div>
+        <div class="modal-actions">
+            <button class="modal-button secondary" id="modalCancelBtn">Mégse</button>
+            <button class="modal-button primary" id="modalSubmitBtn">Beküldés</button>
+        </div>
+    `;
+    showModal('Új Fogalom Javaslata', content);
+    
+    document.getElementById('modalSubmitBtn')?.addEventListener('click', () => {
+        const term = (document.getElementById('suggestTermInput') as HTMLInputElement).value;
+        const definition = (document.getElementById('suggestDefInput') as HTMLTextAreaElement).value;
+        if (term && definition) {
+            state.suggestions.push({ term, definition });
+            hideModal();
+            showToast('Köszönjük a javaslatot!', 'success');
+        } else {
+            showToast('Minden mező kitöltése kötelező!', 'warning');
+        }
+    });
+};
+
+const handleStartQuizClick = async () => {
+    setLoading(true);
+    const knownTerms = Array.from(state.glossary.keys());
+    const question = await getQuizQuestion(knownTerms);
+    if(question) {
+        renderQuiz(question);
+    } else {
+        showToast('Hiba a kvíz indításakor.', 'error');
+        contentArea.innerHTML = '';
+    }
+    setLoading(false);
+}
+
+const loadCategories = async () => {
+    const categories = await getCategoryList();
+    renderCategories(categories);
+}
 
 // --- EVENT LISTENERS ---
-const debouncedSearch = debounce(handleSearch, 500);
-searchInput.addEventListener('input', () => debouncedSearch(searchInput.value));
 
-randomTermBtn.addEventListener('click', handleRandomTerm);
-glossaryLogBtn.addEventListener('click', handleGlossaryLog);
-examGenBtn.addEventListener('click', handleExamGenerator);
-suggestTermBtn.addEventListener('click', handleSuggestTerm);
-viewSuggestionsBtn.addEventListener('click', handleViewSuggestions);
-startQuizBtn.addEventListener('click', handleStartQuiz);
-
-categoryAccordion.addEventListener('toggle', (event) => {
-    const detailsElement = event.target as HTMLDetailsElement;
-    if (detailsElement.tagName === 'DETAILS') {
-        handleCategoryClick(detailsElement);
-    }
-}, true); // Use capture phase to handle toggle event properly
-
-contentArea.addEventListener('click', (event) => {
-    const target = event.target as HTMLElement;
-    
-    // Term click
-    if (target.dataset.term && target.tagName === 'LI') {
-        displayTerm(target.dataset.term);
-    }
-
-    // Add to log
-    if (target.matches('.btn-add-log')) {
-        const term = target.dataset.term;
-        if (term) {
-            state.glossaryLog.add(term);
-            localStorage.setItem('glossaryLog', JSON.stringify(Array.from(state.glossaryLog)));
-            target.textContent = 'Elmentve a naplóba';
-            (target as HTMLButtonElement).disabled = true;
+const setupEventListeners = () => {
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            searchAndDisplayTerm(searchInput.value);
         }
-    }
+    });
 
-    // Suggestion actions
-    const suggestionIndexStr = target.dataset.index;
-    if (suggestionIndexStr) {
-         const suggestionIndex = parseInt(suggestionIndexStr, 10);
-        if (target.matches('.btn-accept-suggestion')) {
-            const term = target.dataset.term;
+    randomTermBtn.addEventListener('click', handleRandomTermClick);
+    glossaryLogBtn.addEventListener('click', renderGlossaryLog);
+    examGenBtn.addEventListener('click', handleExamGenClick);
+    suggestTermBtn.addEventListener('click', handleSuggestTermClick);
+    viewSuggestionsBtn.addEventListener('click', () => renderSuggestions(state.suggestions));
+    startQuizBtn.addEventListener('click', handleStartQuizClick);
+    
+    // Event delegation for dynamically added content
+    contentArea.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        
+        // Handle clickable terms in definitions/log
+        if (target.classList.contains('clickable-term') && target.dataset.term) {
+            searchAndDisplayTerm(target.dataset.term);
+        }
+
+        // Handle related terms list
+        if (target.tagName === 'LI' && target.dataset.term) {
+            searchAndDisplayTerm(target.dataset.term);
+        }
+
+        // Add to log button
+        if (target.id === 'add-to-log-btn') {
+            const term = (contentArea.querySelector('h2') as HTMLElement)?.innerText;
             if (term) {
-                state.suggestions.splice(suggestionIndex, 1);
-                localStorage.setItem('termSuggestions', JSON.stringify(state.suggestions));
-                displayTerm(term);
+                state.glossaryLog.add(term);
+                target.setAttribute('disabled', 'true');
+                target.innerText = 'Naplóban van';
+                showToast('Fogalom a naplóhoz adva!', 'success');
             }
-        } else if (target.matches('.btn-reject-suggestion')) {
-            state.suggestions.splice(suggestionIndex, 1);
-            localStorage.setItem('termSuggestions', JSON.stringify(state.suggestions));
-            renderSuggestions(state.suggestions);
         }
-    }
+
+        // Suggestion buttons
+        if(target.classList.contains('btn-accept-suggestion') || target.classList.contains('btn-reject-suggestion')) {
+            const index = parseInt(target.dataset.index || '-1');
+            if (index > -1) {
+                const term = state.suggestions[index].term;
+                const wasAccepted = target.classList.contains('btn-accept-suggestion');
+                state.suggestions.splice(index, 1);
+                showToast(`A "${term}" javaslat ${wasAccepted ? 'elfogadva' : 'elutasítva'}.`, wasAccepted ? 'success' : 'info');
+                renderSuggestions(state.suggestions); // Re-render the list
+            }
+        }
+        
+        // Quiz option buttons
+        if (target.classList.contains('quiz-option')) {
+            const container = target.closest('.quiz-container');
+            if (container && !container.classList.contains('answered')) {
+                container.classList.add('answered');
+                const isCorrect = target.dataset.correct === 'true';
+                const feedbackEl = container.querySelector('.quiz-feedback') as HTMLDivElement;
+                
+                target.classList.add(isCorrect ? 'correct' : 'incorrect');
+                feedbackEl.textContent = isCorrect ? 'Helyes válasz!' : 'Helytelen válasz!';
+                feedbackEl.className = `quiz-feedback ${isCorrect ? 'feedback-correct' : 'feedback-incorrect'}`;
+
+                if (!isCorrect) {
+                    const correctOption = container.querySelector('.quiz-option[data-correct="true"]');
+                    correctOption?.classList.add('correct');
+                }
+                (container.querySelector('#nextQuestionBtn') as HTMLElement).style.display = 'block';
+            }
+        }
+
+        // Quiz next button
+        if(target.id === 'nextQuestionBtn') {
+            handleStartQuizClick();
+        }
+    });
     
-    // Quiz option click
-    if (target.matches('.quiz-option')) {
-        const quizContainer = target.closest('.quiz-container');
-        if (!quizContainer || quizContainer.classList.contains('answered')) return;
-
-        quizContainer.classList.add('answered'); // Prevent re-answering
-        const isCorrect = target.dataset.correct === 'true';
-        const feedbackEl = quizContainer.querySelector('.quiz-feedback') as HTMLDivElement;
-        const nextButton = quizContainer.querySelector('#nextQuestionBtn') as HTMLButtonElement;
-
-        if (isCorrect) {
-            target.classList.add('correct');
-            feedbackEl.innerHTML = `<p class="feedback-correct">Helyes! ✅</p>`;
-        } else {
-            target.classList.add('incorrect');
-            const correctButton = quizContainer.querySelector('.quiz-option[data-correct="true"]') as HTMLElement;
-            if (correctButton) correctButton.classList.add('correct');
-            feedbackEl.innerHTML = `<p class="feedback-incorrect">Helytelen! ❌</p>`;
+    contentArea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            const target = e.target as HTMLElement;
+            if (target.classList.contains('clickable-term') && target.dataset.term) {
+                searchAndDisplayTerm(target.dataset.term);
+            }
         }
-        if(nextButton) nextButton.style.display = 'block';
-    }
+    });
 
-    // Next question click
-    if (target.id === 'nextQuestionBtn') {
-        handleStartQuiz();
-    }
-});
+    categoryAccordion?.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
 
-// --- INITIALIZATION ---
-const init = () => {
-    const savedLog = localStorage.getItem('glossaryLog');
-    if (savedLog) {
-        state.glossaryLog = new Set(JSON.parse(savedLog));
-    }
-    const savedSuggestions = localStorage.getItem('termSuggestions');
-    if (savedSuggestions) {
-        state.suggestions = JSON.parse(savedSuggestions);
-    }
-    console.log("Pénzügyi Tudástár+ inicializálva.");
+        if (target.tagName === 'SUMMARY') {
+            const detailsElement = target.parentElement as HTMLDetailsElement;
+            const category = detailsElement.dataset.category;
+            // FIX: Check if details is NOT open. It will be opened by the click.
+            if (!detailsElement.open && category && !state.categoryCache.has(category)) {
+                handleCategoryClick(category, detailsElement);
+            }
+        }
+
+        if (target.tagName === 'LI' && target.dataset.term) {
+            searchAndDisplayTerm(target.dataset.term);
+        }
+    });
+    
+    categoryAccordion.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            const target = e.target as HTMLElement;
+             if (target.tagName === 'LI' && target.dataset.term) {
+                e.preventDefault();
+                searchAndDisplayTerm(target.dataset.term);
+            }
+        }
+    });
+
+    modalOverlay.addEventListener('click', e => {
+        if (e.target === modalOverlay || (e.target as HTMLElement).id === 'modalCancelBtn') {
+            hideModal();
+        }
+    });
 };
 
-init();
+// --- INITIALIZATION ---
+const initApp = () => {
+    setupEventListeners();
+    loadCategories();
+};
+
+initApp();
