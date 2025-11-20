@@ -85,10 +85,22 @@ const setLoading = (isLoading: boolean) => {
 
 const renderTerm = (termDetails: GlossaryEntry) => {
     const isTermInLog = state.glossaryLog.has(termDetails.term);
-    const highlightedDefinition = termDetails.definition.replace(
-        new RegExp(`\\b(${termDetails.keyTermsInDefinition.join('|')})\\b`, 'gi'),
-        (match) => `<span class="clickable-term" tabindex="0" role="button" data-term="${match}">${match}</span>`
-    );
+    
+    // Safe regex creation to prevent syntax errors with special characters
+    let highlightedDefinition = termDetails.definition;
+    if (termDetails.keyTermsInDefinition && termDetails.keyTermsInDefinition.length > 0) {
+        const escapedTerms = termDetails.keyTermsInDefinition
+            .filter(t => t && t.trim().length > 0)
+            .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')); // Escape special regex chars
+        
+        if (escapedTerms.length > 0) {
+            const pattern = new RegExp(`\\b(${escapedTerms.join('|')})\\b`, 'gi');
+            highlightedDefinition = termDetails.definition.replace(
+                pattern,
+                (match) => `<span class="clickable-term" tabindex="0" role="button" data-term="${match}">${match}</span>`
+            );
+        }
+    }
 
     const relatedTermsHtml = termDetails.relatedTerms.map(term => `<li data-term="${term}">${term}</li>`).join('');
     
@@ -118,21 +130,81 @@ const renderTermGraph = (termDetails: GlossaryEntry) => {
     const container = document.getElementById('term-graph-container');
     if (!container) return;
 
-    const nodes = new vis.DataSet([
-        { id: termDetails.term, label: termDetails.term, color: '#C19A6B', font: { color: '#0F1C2E' }, size: 30 },
-        ...termDetails.relatedTerms.map(term => ({ id: term, label: term, color: '#1F4D59', font: { color: '#E8EEF2' } }))
-    ]);
+    // Create the main node (Level 0)
+    const nodesArr: any[] = [
+        {
+            id: termDetails.term,
+            label: termDetails.term,
+            color: { background: '#C19A6B', border: '#A07855' }, // Gold color for main term
+            font: { color: '#0F1C2E', size: 22, face: 'Segoe UI', bold: true },
+            shape: 'box',
+            level: 0, // Top level
+            margin: 15,
+            shadow: true
+        }
+    ];
 
+    // Filter related terms to exclude the term itself and remove duplicates
+    const uniqueRelatedTerms = [...new Set(termDetails.relatedTerms)]
+        .filter(t => t !== termDetails.term);
+
+    // Create related nodes (Level 1)
+    uniqueRelatedTerms.forEach(term => {
+        nodesArr.push({
+            id: term,
+            label: term,
+            color: { background: '#1F4D59', border: '#5A6A89' }, // Teal color for related
+            font: { color: '#E8EEF2', size: 14, face: 'Segoe UI' },
+            shape: 'box',
+            level: 1 // Second level
+        });
+    });
+
+    const nodes = new vis.DataSet(nodesArr);
+
+    // Create edges connecting Main -> Related
     const edges = new vis.DataSet(
-        termDetails.relatedTerms.map(term => ({ from: termDetails.term, to: term }))
+        uniqueRelatedTerms.map(term => ({
+            from: termDetails.term,
+            to: term,
+            arrows: 'to',
+            color: { color: '#5A6A89' },
+            width: 2
+        }))
     );
 
     const data = { nodes: nodes, edges: edges };
+
     const options = {
-        nodes: { shape: 'box', borderWidth: 2, font: { size: 14 } },
-        edges: { color: '#5A6A89' },
-        interaction: { hover: true },
-        layout: { hierarchical: false }
+        layout: {
+            hierarchical: {
+                enabled: true,
+                direction: 'UD', // Up-Down direction
+                sortMethod: 'directed', // Ensures proper levels
+                nodeSpacing: 180, // Horizontal space between nodes
+                levelSeparation: 150, // Vertical space between levels
+                treeSpacing: 200,
+                blockShifting: true,
+                edgeMinimization: true,
+                parentCentralization: true // Keeps the parent centered above children
+            }
+        },
+        physics: {
+            enabled: false // Disable physics for a stable, static tree view
+        },
+        interaction: {
+            dragNodes: false, // Lock nodes in place
+            zoomView: true,
+            dragView: true,
+            hover: true
+        },
+        edges: {
+            smooth: {
+                type: 'cubicBezier',
+                forceDirection: 'vertical',
+                roundness: 0.4
+            }
+        }
     };
 
     new vis.Network(container, data, options);
@@ -446,22 +518,26 @@ const setupEventListeners = () => {
         }
     });
 
+    // Listen for click events on items inside the accordion
     categoryAccordion?.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
-
-        if (target.tagName === 'SUMMARY') {
-            const detailsElement = target.parentElement as HTMLDetailsElement;
-            const category = detailsElement.dataset.category;
-            // FIX: Check if details is NOT open. It will be opened by the click.
-            if (!detailsElement.open && category && !state.categoryCache.has(category)) {
-                handleCategoryClick(category, detailsElement);
-            }
-        }
-
         if (target.tagName === 'LI' && target.dataset.term) {
             searchAndDisplayTerm(target.dataset.term);
         }
     });
+
+    // Use capturing listener for 'toggle' event to reliably detect when DETAILS opens
+    // 'toggle' event does not bubble, so we must use capture: true
+    categoryAccordion?.addEventListener('toggle', (e) => {
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'DETAILS') {
+            const detailsElement = target as HTMLDetailsElement;
+            const category = detailsElement.dataset.category;
+            if (detailsElement.open && category && !state.categoryCache.has(category)) {
+                handleCategoryClick(category, detailsElement);
+            }
+        }
+    }, true);
     
     categoryAccordion.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') {
